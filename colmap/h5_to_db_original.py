@@ -2,7 +2,6 @@ import os, argparse, h5py, warnings
 import numpy as np
 from tqdm import tqdm
 from PIL import Image, ExifTags
-import cv2
 
 from colmap.database import COLMAPDatabase, image_ids_to_pair_id
 
@@ -55,30 +54,6 @@ def create_camera(db, image_path):
          
     return db.add_camera(model, width, height, param_arr)
 
-def check_masking(h5_path, mask_path):
-    keypoint_f = h5py.File(os.path.join(h5_path, 'keypoints.h5'), 'r')
-
-    camera_id = None
-    mask_keyp_id = {}
-    for filename in tqdm(list(keypoint_f.keys())):
-        keypoints = keypoint_f[filename][()]
-
-        fname_with_ext = filename + '.jpg.png'
-        path = os.path.join(mask_path, fname_with_ext)
-        if not os.path.isfile(path):
-            raise IOError(f'Invalid image path {path}')
-
-        M = cv2.imread(path, 2)
-        inds1 = M[np.ceil(keypoints[:,1]).astype(int), np.ceil(keypoints[:,0]).astype(int)]
-        inds2 = M[np.ceil(keypoints[:,1]).astype(int), np.floor(keypoints[:,0]).astype(int)]
-        inds3 = M[np.floor(keypoints[:,1]).astype(int), np.ceil(keypoints[:,0]).astype(int)]
-        inds4 = M[np.floor(keypoints[:,1]).astype(int), np.floor(keypoints[:,0]).astype(int)]
-        inds = inds1 + inds2 + inds3 + inds4
-        keep_inds = inds==0
-
-        mask_keyp_id[filename] = keep_inds
-
-    return mask_keyp_id
 
 def add_keypoints(db, h5_path, image_path):
     keypoint_f = h5py.File(os.path.join(h5_path, 'keypoints.h5'), 'r')
@@ -87,6 +62,7 @@ def add_keypoints(db, h5_path, image_path):
     fname_to_id = {}
     for filename in tqdm(list(keypoint_f.keys())):
         keypoints = keypoint_f[filename][()]
+
         fname_with_ext = filename + args.image_extension
         path = os.path.join(image_path, fname_with_ext)
         if not os.path.isfile(path):
@@ -101,7 +77,7 @@ def add_keypoints(db, h5_path, image_path):
 
     return fname_to_id
 
-def add_matches(db, h5_path, fname_to_id, mask_keyp_id):
+def add_matches(db, h5_path, fname_to_id):
     match_file = h5py.File(os.path.join(h5_path, 'matches.h5'), 'r')
     
     added = set()
@@ -121,12 +97,7 @@ def add_matches(db, h5_path, fname_to_id, mask_keyp_id):
                     continue
             
                 matches = group[key_2][()]
-                
-                # check that the keypoints are not masked
-                mask_key1 = mask_keyp_id[key_1][matches[0]]
-                mask_key2 = mask_keyp_id[key_2][matches[1]]
-                masked_matches = np.logical_and(mask_key1, mask_key2)
-                db.add_matches(id_1, id_2, matches.T[masked_matches])
+                db.add_matches(id_1, id_2, matches.T)
 
                 added.add(pair_id)
 
@@ -137,7 +108,6 @@ if __name__ == '__main__':
     parser.add_argument('h5_path', help=('Path to the directory with '
                                          'keypoints.h5 and matches.h5'))
     parser.add_argument('image_path', help='Path to source images')
-    parser.add_argument('mask_path', help='Path to source images')
     parser.add_argument(
         '--image-extension', default='.jpg', type=str,
         help='Extension of files in image_path'
@@ -173,13 +143,10 @@ if __name__ == '__main__':
     db.create_tables()
 
     fname_to_id = add_keypoints(db, args.h5_path, args.image_path)
-    mask_keyp_id = check_masking(args.h5_path, args.mask_path)
-    
     add_matches(
         db,
         args.h5_path,
         fname_to_id,
-        mask_keyp_id,
     )
 
     db.commit()

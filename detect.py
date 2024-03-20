@@ -1,4 +1,5 @@
-import torch, h5py, imageio, os, argparse
+import torch, h5py, os, argparse
+import imageio.v2 as imageio # 경고 땜에 수정
 import numpy as np
 import torch.nn.functional as F
 from functools import partial
@@ -83,7 +84,7 @@ class SceneDataset:
     def __getitem__(self, ix):
         name   = self.names[ix]
         path   = os.path.join(self.image_path, name) 
-        img    = np.ascontiguousarray(imageio.imread(path))
+        img    = np.array(imageio.imread(path))
         tensor = torch.from_numpy(img).to(torch.float32)
 
         if len(tensor.shape) == 2: # some images may be grayscale
@@ -111,7 +112,7 @@ def extract(dataset, save_path):
         batch_size=1,
         pin_memory=True,
         collate_fn=dataset.collate_fn,
-        num_workers=4,
+        num_workers=1
     )
 
     if args.mode == 'nms':
